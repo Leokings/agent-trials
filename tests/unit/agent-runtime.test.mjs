@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { advanceJob, commitment, createProviderWallet, createStore, rpcRetryDelay, runJob } from "../../scripts/agent-runtime.mjs";
+import { advanceJob, commitment, createProviderWallet, createStore, recoverUncertain, requestPublicScore, rpcRetryDelay, runJob } from "../../scripts/agent-runtime.mjs";
 
 const address = `0x${"2".repeat(40)}`;
 const trialId = "agent-flow-01";
@@ -11,8 +11,11 @@ const makeHash = (number) => `0x${number.toString(16).padStart(64, "0")}`;
 
 test("RPC quota errors back off far longer than transient failures", () => {
   assert.equal(rpcRetryDelay(new Error("HTTP 429: 500 requests per hour"), 1), 600_000);
-  assert.equal(rpcRetryDelay(new Error("rate limit reached"), 2), 1_200_000);
-  assert.equal(rpcRetryDelay(new Error("rate limit reached"), 5), 3_600_000);
+  assert.equal(rpcRetryDelay(new Error("rate limit reached"), 2), 150_000);
+  assert.equal(rpcRetryDelay(new Error("500 requests per hour"), 5), 3_600_000);
+  assert.equal(rpcRetryDelay(new Error("Rate limit exceeded: 30 requests per minute"), 1), 75_000);
+  assert.equal(rpcRetryDelay(new Error("Rate limit exceeded: 30 requests per minute"), 2), 150_000);
+  assert.equal(rpcRetryDelay(new Error("Rate limit exceeded: 30 requests per minute"), 5), 180_000);
   assert.equal(rpcRetryDelay(new Error("temporary gateway failure"), 1), 30_000);
   assert.equal(rpcRetryDelay(new Error("temporary gateway failure"), 3), 120_000);
 });
@@ -32,7 +35,7 @@ test("runner applies increasing quota delays instead of retrying every 15 second
   const result = await runJob({ trialId, chain, wallet: { address }, store,
     sleep: async (delay) => { delays.push(delay); if (delays.length === 2) job.phase = "complete"; },
   });
-  assert.deepEqual(delays, [600_000, 1_200_000]);
+  assert.deepEqual(delays, [75_000, 150_000]);
   assert.equal(reads, 2);
   assert.equal(result.phase, "complete");
   assert.equal(released, true);
@@ -143,19 +146,117 @@ test("uncertain wallet submission is not automatically repeated", async () => {
     const store = createStore(directory);
     await store.create({ trialId, address, contract: `0x${"1".repeat(40)}`, name: "Atlas One", answer: "A valid answer." });
     let writes = 0;
+    const contract = `0x${"1".repeat(40)}`;
+    const trial = { id: trialId, commit_deadline_ms: Date.now() + 60_000, reveal_deadline_ms: Date.now() + 120_000 };
     const input = {
       job: await store.read(trialId, address), store, now: Date.now,
-      chain: { address: `0x${"1".repeat(40)}`, trial: async () => ({ id: trialId, commit_deadline_ms: Date.now() + 60_000 }), agent: async () => ({ registered: false }), entry: async () => ({ committed: false, revealed: false, scored: false }) },
-      wallet: { address, async writeContract() { writes++; throw new Error("wallet response lost"); } },
+      chain: { address: contract, trial: async () => trial, agent: async () => ({ registered: false }), entry: async () => ({ committed: false, revealed: false, scored: false }) },
+      wallet: { address, async writeContract() { writes++; if (writes === 1) throw new Error("wallet response lost"); return makeHash(11); } },
     };
     assert.deepEqual(await advanceJob(input), { done: true });
     assert.equal((await store.read(trialId, address)).phase, "needs_attention");
     await advanceJob({ ...input, job: await store.read(trialId, address) });
     assert.equal(writes, 1);
+    const observed = await recoverUncertain({ trialId, chain: input.chain, wallet: input.wallet, store });
+    assert.equal(observed.resolution, "not_observed");
+    assert.equal(writes, 1, "read-only reconciliation must not submit a duplicate");
+    const armed = await recoverUncertain({ trialId, chain: input.chain, wallet: input.wallet, store, allowResubmit: true });
+    assert.equal(armed.resolution, "retry_armed");
+    await advanceJob({ ...input, job: await store.read(trialId, address) });
+    assert.equal(writes, 2, "explicit confirmation permits one retry");
+    assert.equal((await store.read(trialId, address)).tx.register.hash, makeHash(11));
   } finally {
     assert.ok(directory.startsWith(join(tmpdir(), "agent-trials-test-")));
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("recovery follows finalized state instead of repeating a write", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agent-trials-test-"));
+  try {
+    const store = createStore(directory);
+    const contract = `0x${"1".repeat(40)}`;
+    const job = await store.create({ trialId, address, contract, name: "Atlas One", answer: "A valid answer." });
+    job.phase = "needs_attention";
+    job.uncertainStage = "register";
+    job.error = "wallet response lost";
+    await store.save(job);
+    let writes = 0;
+    const chain = {
+      address: contract,
+      trial: async () => ({ id: trialId, commit_deadline_ms: Date.now() + 60_000, reveal_deadline_ms: Date.now() + 120_000 }),
+      agent: async () => ({ registered: true }),
+      entry: async () => ({ committed: false, revealed: false, scored: false }),
+    };
+    const wallet = { address, async writeContract() { writes++; return makeHash(12); } };
+    const recovery = await recoverUncertain({ trialId, chain, wallet, store });
+    assert.equal(recovery.resolution, "already_applied");
+    await advanceJob({ job: await store.read(trialId, address), chain, wallet, store });
+    assert.equal(writes, 1);
+    assert.equal((await store.read(trialId, address)).tx.commit.hash, makeHash(12));
+  } finally {
+    assert.ok(directory.startsWith(join(tmpdir(), "agent-trials-test-")));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("failed finalized transaction leaves a recoverable run instead of polling forever", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agent-trials-test-"));
+  try {
+    const store = createStore(directory);
+    const contract = `0x${"1".repeat(40)}`;
+    const job = await store.create({ trialId, address, contract, name: "Atlas One", answer: "A valid answer." });
+    job.tx.register = { hash: makeHash(13), submittedAt: Date.now() - 60_000, finalized: false };
+    await store.save(job);
+    const chain = {
+      address: contract,
+      trial: async () => ({ id: trialId, commit_deadline_ms: Date.now() + 60_000, reveal_deadline_ms: Date.now() + 120_000 }),
+      agent: async () => ({ registered: false }),
+      entry: async () => ({ committed: false, revealed: false, scored: false }),
+      transaction: async () => ({ status: "FINALIZED", execution: "FINISHED_WITH_ERROR" }),
+    };
+    const wallet = { address, async writeContract() { return makeHash(14); } };
+    assert.deepEqual(await advanceJob({ job: await store.read(trialId, address), chain, wallet, store }), { done: true });
+    assert.equal((await store.read(trialId, address)).tx.register.finalized, true);
+    assert.equal((await store.read(trialId, address)).phase, "needs_attention");
+    assert.equal((await recoverUncertain({ trialId, chain, wallet, store })).resolution, "not_observed");
+    assert.equal((await recoverUncertain({ trialId, chain, wallet, store, allowResubmit: true })).resolution, "retry_armed");
+    assert.equal((await store.read(trialId, address)).supersededTx[0].hash, makeHash(13));
+    await advanceJob({ job: await store.read(trialId, address), chain, wallet, store });
+    assert.equal((await store.read(trialId, address)).tx.register.hash, makeHash(14));
+  } finally {
+    assert.ok(directory.startsWith(join(tmpdir(), "agent-trials-test-")));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("public scoring fallback only submits eligible revealed entries", async () => {
+  const deadline = Date.now() - 1;
+  const entry = { revealed: true, scored: false };
+  const intents = [];
+  const chain = {
+    address: `0x${"1".repeat(40)}`,
+    trial: async () => ({ id: trialId, reveal_deadline_ms: deadline }),
+    entry: async () => entry,
+  };
+  const wallet = { address, async writeContract(intent) { intents.push(intent); return makeHash(15); } };
+  const scored = await requestPublicScore({ trialId, agentAddress: address, chain, wallet });
+  assert.equal(scored.hash, makeHash(15));
+  assert.equal(intents[0].functionName, "score_answer");
+  assert.equal(intents[0].leaderOnly, false);
+  entry.scored = true;
+  entry.result = { points: 60 };
+  assert.deepEqual(await requestPublicScore({ trialId, agentAddress: address, chain, wallet }), { already_scored: true, result: { points: 60 } });
+  assert.equal(intents.length, 1);
+  entry.scored = false;
+  entry.revealed = false;
+  await assert.rejects(requestPublicScore({ trialId, agentAddress: address, chain, wallet }), /did not reveal/);
+  entry.revealed = true;
+  chain.trial = async () => ({ id: trialId, reveal_deadline_ms: Date.now() + 60_000 });
+  await assert.rejects(requestPublicScore({ trialId, agentAddress: address, chain, wallet }), /after the reveal window/);
+  chain.trial = async () => ({ id: trialId, reveal_deadline_ms: deadline });
+  await assert.rejects(requestPublicScore({ trialId, agentAddress: address, chain,
+    wallet: { address, async writeContract() { throw new Error("response lost"); } } }), /submission is uncertain.*wallet history/);
 });
 
 test("pending commit is tracked across the deadline instead of expiring or revealing early", async () => {

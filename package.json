@@ -20,6 +20,7 @@
     "test:contract": "pytest tests/direct -q",
     "test:studionet": "node scripts/verify-full-flow.mjs",
     "test:agent:studionet": "node scripts/verify-agent-runner.mjs",
+    "test:mcp:studionet": "node scripts/verify-agent-mcp-live.mjs",
     "lint:contract": "genvm-lint check contracts/AgentTrials.py --json"
   },
   "dependencies": {

@@ -19,8 +19,9 @@ const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 export function rpcRetryDelay(error, consecutiveFailures = 1) {
   const message = String(error?.message ?? error).toLowerCase();
   const limited = /(?:429|rate.?limit|quota|too many requests|requests? per hour)/.test(message);
-  const base = limited ? 10 * 60_000 : 30_000;
-  const cap = limited ? 60 * 60_000 : 5 * 60_000;
+  const hourly = /(?:requests? per hour|per hour|hourly)/.test(message);
+  const base = hourly ? 10 * 60_000 : limited ? 75_000 : 30_000;
+  const cap = hourly ? 60 * 60_000 : limited ? 3 * 60_000 : 5 * 60_000;
   return Math.min(cap, base * 2 ** Math.min(6, Math.max(0, consecutiveFailures - 1)));
 }
 
@@ -243,8 +244,8 @@ export function createStore(directory = process.env.AGENT_TRIALS_STATE_DIR || jo
 
 export function publicJob(job) {
   if (!job) return null;
-  const { trialId, address, name, phase, error, digest, tx, points, createdAt, updatedAt } = job;
-  return { trialId, address, name, phase, error, digest, tx, points, createdAt, updatedAt };
+  const { trialId, address, name, phase, error, uncertainStage, digest, tx, supersededTx, points, createdAt, updatedAt } = job;
+  return { trialId, address, name, phase, error, uncertainStage, digest, tx, supersededTx, points, createdAt, updatedAt };
 }
 
 async function put(store, job, changes) {
@@ -273,7 +274,9 @@ async function advanceTransaction(stage, intent, { job, chain, wallet, store, no
   const outcome = await chain.transaction(previous.hash);
   if (outcome.status === "FINALIZED") {
     if (outcome.execution !== "FINISHED_WITH_RETURN") {
-      await put(store, job, { phase: "needs_attention", uncertainStage: null, error: `${stage} finalized without a successful contract result (${outcome.execution}).` });
+      previous.finalized = true;
+      previous.failed = true;
+      await put(store, job, { phase: "needs_attention", uncertainStage: stage, error: `${stage} finalized without a successful contract result (${outcome.execution}). Check the onchain state before retrying.` });
       return { done: true };
     }
     previous.finalized = true;
@@ -324,6 +327,11 @@ export async function advanceJob({ job, chain, wallet, store, now = Date.now }) 
       || job.uncertainStage === "reveal" && entry.revealed
       || job.uncertainStage === "score" && entry.scored;
     if (!advanced) return { done: true };
+    if (job.tx[job.uncertainStage]) {
+      job.supersededTx ??= [];
+      job.supersededTx.push({ stage: job.uncertainStage, ...job.tx[job.uncertainStage] });
+      delete job.tx[job.uncertainStage];
+    }
     await put(store, job, { phase: "queued", error: null, uncertainStage: null });
   }
   if (!agent.registered) {
@@ -406,6 +414,64 @@ export async function startJob({ trialId, name, answer, chain = createChain(), w
     }
   }
   return store.create({ trialId, address: wallet.address, name, answer, contract: chain.address, trial });
+}
+
+// A missing transaction hash cannot prove that a write failed. The caller may
+// inspect finalized state without risk, then explicitly authorize one retry.
+export async function recoverUncertain({ trialId, chain = createChain(), wallet, store = createStore(), allowResubmit = false, now = Date.now }) {
+  assertTrialId(trialId);
+  if (typeof store.running === "function" && await store.running(trialId, wallet.address)) {
+    throw new Error("A runner is still active for this trial. Check run_status first.");
+  }
+  const job = await store.read(trialId, wallet.address);
+  if (!job) throw new Error("No saved run for this trial and wallet.");
+  if (job.contract?.toLowerCase() !== chain.address.toLowerCase()) throw new Error("Saved run belongs to another contract.");
+  const stage = job.uncertainStage;
+  if (job.phase !== "needs_attention" || !["register", "commit", "reveal", "score"].includes(stage)) {
+    throw new Error("This run has no uncertain contract write to recover.");
+  }
+  const [trial, agent, entry] = await Promise.all([
+    chain.trial(trialId), chain.agent(wallet.address), chain.entry(trialId, wallet.address),
+  ]);
+  const applied = stage === "register" && agent.registered
+    || stage === "commit" && entry.committed
+    || stage === "reveal" && entry.revealed
+    || stage === "score" && entry.scored;
+  if (!applied && !allowResubmit) {
+    return { resolution: "not_observed", run: publicJob(job), message: "The write is not visible in finalized state. Check wallet transaction history; a pending write may still land. Confirm possible duplication before retrying." };
+  }
+  if (!applied && ((stage === "register" || stage === "commit") && now() >= trial.commit_deadline_ms
+    || stage === "reveal" && now() >= trial.reveal_deadline_ms)) {
+    throw new Error(`${stage} can no longer be retried because its trial window closed.`);
+  }
+  if (job.tx[stage]) {
+    job.supersededTx ??= [];
+    job.supersededTx.push({ stage, ...job.tx[stage] });
+    delete job.tx[stage];
+  }
+  await put(store, job, { phase: "queued", error: null, uncertainStage: null });
+  return { resolution: applied ? "already_applied" : "retry_armed", run: publicJob(job), message: applied
+    ? "Finalized state shows the write succeeded. The runner can continue without resubmitting it."
+    : "One retry is armed. The contract rejects duplicate registration, commitment, reveal, and scoring, but the previous write may still appear." };
+}
+
+export async function requestPublicScore({ trialId, agentAddress, chain = createChain(), wallet, now = Date.now }) {
+  assertTrialId(trialId);
+  assertAddress(agentAddress);
+  const [trial, entry] = await Promise.all([chain.trial(trialId), chain.entry(trialId, agentAddress)]);
+  if (!trial?.id) throw new Error("Trial not found on GenLayer.");
+  if (now() < trial.reveal_deadline_ms) throw new Error("Scoring begins after the reveal window.");
+  if (!entry.revealed) throw new Error("The agent did not reveal an answer.");
+  if (entry.scored) return { already_scored: true, result: entry.result };
+  let hash;
+  try {
+    hash = await wallet.writeContract({ chainId: CHAIN_ID, endpoint: ENDPOINT, address: chain.address,
+      functionName: "score_answer", args: [trialId, agentAddress], leaderOnly: false });
+  } catch (error) {
+    throw new Error(`Score submission is uncertain: ${error.message}. Check wallet history and finalized entry state before retrying.`);
+  }
+  if (!TX_HASH.test(hash)) throw new Error("Wallet adapter did not return a score transaction hash. Check wallet history before retrying.");
+  return { hash, trial_id: trialId, agent: agentAddress, message: "Score submitted. Check transaction_status and finalize_transaction; only finalized successful execution awards points." };
 }
 
 export async function generateAnswer(trial) {

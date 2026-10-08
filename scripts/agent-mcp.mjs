@@ -6,7 +6,8 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import {
-  assertTrialId, CHAIN_ID, createChain, createStore, loadWalletAdapter, publicJob, startJob,
+  assertTrialId, CHAIN_ID, createChain, createStore, loadWalletAdapter, publicJob,
+  recoverUncertain, requestPublicScore, startJob,
 } from "./agent-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -85,8 +86,25 @@ export function createServer({ chain = createChain(), store = createStore(), wal
       const job = await store.read(assertTrialId(trial_id), wallet.address);
       if (!job) throw new Error("No saved run for this trial and wallet.");
       if (job.phase === "complete") return { run: publicJob(job), message: "This run is complete." };
+      if (job.phase === "needs_attention" && !job.uncertainStage) {
+        return { run: publicJob(job), message: "This run cannot resume automatically. Restore its local state key or inspect the reported error." };
+      }
+      if (job.phase === "needs_attention" && job.uncertainStage) {
+        const recovery = await recoverUncertain({ trialId: trial_id, chain, wallet, store });
+        if (recovery.resolution === "not_observed") return { ...recovery, hint: "Use recover_uncertain only after checking wallet history and accepting the possible duplicate." };
+      }
       const pid = await store.running(trial_id, wallet.address) ?? await launch(trial_id);
-      return { run: publicJob(job), runner_pid: pid };
+      return { run: publicJob(await store.read(trial_id, wallet.address)), runner_pid: pid };
+    });
+
+  tool("recover_uncertain", "Inspect an uncertain write against finalized state. An explicit confirmation is required to retry a write that is not visible; it may still be pending, and the contract will reject duplicates.",
+    z.object({ trial_id: z.string(), confirm_possible_duplicate: z.boolean().default(false) }),
+    async ({ trial_id, confirm_possible_duplicate }) => {
+      const wallet = await walletLoader();
+      const recovery = await recoverUncertain({ trialId: trial_id, chain, wallet, store, allowResubmit: confirm_possible_duplicate });
+      if (recovery.resolution === "not_observed") return recovery;
+      const pid = await launch(trial_id);
+      return { ...recovery, runner_pid: pid };
     });
 
   tool("run_status", "Read this agent's saved run and finalized onchain entry; does not expose the answer or salt.",
@@ -95,7 +113,17 @@ export function createServer({ chain = createChain(), store = createStore(), wal
       const wallet = await walletLoader();
       const id = assertTrialId(trial_id);
       const [job, entry, runnerPid] = await Promise.all([store.read(id, wallet.address), chain.entry(id, wallet.address), store.running(id, wallet.address)]);
-      return { run: publicJob(job), entry, runner_pid: runnerPid, ...(job && !runnerPid && job.phase !== "complete" ? { hint: "Runner is offline. Call resume_trial to continue." } : {}) };
+      const hint = job?.phase === "needs_attention" && job.uncertainStage
+        ? "The write needs reconciliation. Call recover_uncertain to inspect finalized state before choosing a retry."
+        : job && !runnerPid && job.phase !== "complete" ? "Runner is offline. Call resume_trial to continue." : null;
+      return { run: publicJob(job), entry, runner_pid: runnerPid, ...(hint ? { hint } : {}) };
+    });
+
+  tool("score_entry", "Anyone with a Studionet wallet can request independent validator scoring for a revealed answer after the reveal deadline. This is a fallback if its runner stopped; the result still needs successful finalization.",
+    z.object({ trial_id: z.string(), agent_address: z.string().regex(/^0x[a-f0-9]{40}$/i) }),
+    async ({ trial_id, agent_address }) => {
+      const wallet = await walletLoader();
+      return requestPublicScore({ trialId: trial_id, agentAddress: agent_address, chain, wallet });
     });
 
   tool("transaction_status", "Inspect a GenLayer transaction. ACCEPTED is provisional; require FINALIZED and successful execution.",

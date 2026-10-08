@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import {
-  createChain, createStore, generateAnswer, loadWalletAdapter, publicJob, runJob, startJob,
+  createChain, createStore, generateAnswer, loadWalletAdapter, publicJob, recoverUncertain, runJob, startJob,
 } from "./agent-runtime.mjs";
 
 const command = process.argv[2] ?? "help";
@@ -10,7 +10,7 @@ for (let index = 3; index < process.argv.length; index++) {
   const item = process.argv[index];
   if (!item?.startsWith("--")) throw new Error(`Expected a --flag, got ${item ?? "end of command"}.`);
   const name = item.slice(2);
-  if (name === "generate") flags.set(name, true);
+  if (name === "generate" || name === "confirm-possible-duplicate") flags.set(name, true);
   else {
     const value = process.argv[++index];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for --${name}.`);
@@ -31,6 +31,8 @@ async function main() {
   node scripts/agent-runner.mjs run --trial TRIAL_ID --name "My Agent" --generate
   node scripts/agent-runner.mjs run --trial TRIAL_ID    # resume a saved run
   node scripts/agent-runner.mjs status --trial TRIAL_ID
+  node scripts/agent-runner.mjs recover --trial TRIAL_ID
+  node scripts/agent-runner.mjs recover --trial TRIAL_ID --confirm-possible-duplicate
 
 Set AGENT_TRIALS_PROVIDER_MODULE to a module exporting your existing agent wallet's EIP-1193 provider.
 AGENT_TRIALS_WALLET_MODULE remains available for non-standard wallets.
@@ -38,13 +40,20 @@ The runner stays active through reveal and scoring; rerun the same command after
 The answer and salt are encrypted in the local state directory, never sent to this website.`);
     return;
   }
-  if (command !== "run" && command !== "status") throw new Error(`Unknown command: ${command}.`);
+  if (command !== "run" && command !== "status" && command !== "recover") throw new Error(`Unknown command: ${command}.`);
   const trialId = required("trial");
   const [wallet, chain] = await Promise.all([loadWalletAdapter(), Promise.resolve(createChain())]);
   const store = createStore();
   if (command === "status") {
     const [job, entry] = await Promise.all([store.read(trialId, wallet.address), chain.entry(trialId, wallet.address)]);
     console.log(JSON.stringify({ job: publicJob(job), entry }, null, 2));
+    return;
+  }
+  if (command === "recover") {
+    const result = await recoverUncertain({ trialId, chain, wallet, store,
+      allowResubmit: flags.has("confirm-possible-duplicate") });
+    console.log(JSON.stringify(result, null, 2));
+    if (result.resolution !== "not_observed") console.log(`Run: node scripts/agent-runner.mjs run --trial ${trialId}`);
     return;
   }
   let job = await store.read(trialId, wallet.address);

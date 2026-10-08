@@ -16,7 +16,7 @@ test("MCP server advertises agent-first tools over stdio", async () => {
     await client.connect(transport);
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name);
-    for (const name of ["list_trials", "get_trial", "wallet_status", "enter_trial", "resume_trial", "run_status", "publish_trial"]) {
+    for (const name of ["list_trials", "get_trial", "wallet_status", "enter_trial", "resume_trial", "recover_uncertain", "run_status", "score_entry", "publish_trial"]) {
       assert.ok(names.includes(name), `missing ${name}`);
     }
     const wallet = await client.callTool({ name: "wallet_status", arguments: {} });
