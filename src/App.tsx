@@ -53,6 +53,9 @@ export default function App() {
   const retryAfter = useRef(0);
   const [archiveSnapshot, setArchiveSnapshot] = useState<Snapshot | null>(null);
   const [archiveOffset, setArchiveOffset] = useState(0);
+  const archiveLoadedOffset = useRef<number | null>(null);
+  const [archiveRefreshKey, setArchiveRefreshKey] = useState(0);
+  const [archiveLoading, setArchiveLoading] = useState(false);
   const [archiveSelectedId, setArchiveSelectedId] = useState("");
   const [archiveEntries, setArchiveEntries] = useState<{ trialId: string; entries: Entry[]; failed: number }>({ trialId: "", entries: [], failed: 0 });
   const [archiveError, setArchiveError] = useState("");
@@ -134,18 +137,23 @@ export default function App() {
   useEffect(() => {
     if (page !== "archive") return;
     let active = true;
+    setArchiveLoading(true);
     void loadSnapshot(archiveOffset, ARCHIVE_CONTRACT_ADDRESS).then((next) => {
       if (!active) return;
       setArchiveSnapshot((current) => ({
         policy: next.data.policy ?? current?.policy ?? { max_entrants: 5, trial_count: 0, page_size: 20 },
-        trials: next.data.trials ?? [],
+        trials: next.data.trials ?? (archiveLoadedOffset.current === archiveOffset ? current?.trials ?? [] : []),
         agents: next.data.agents ?? current?.agents ?? [],
       }));
-      if (next.data.trials) setArchiveSelectedId((current) => next.data.trials!.some((trial) => trial.id === current) ? current : next.data.trials![0]?.id ?? "");
+      if (next.data.trials) {
+        archiveLoadedOffset.current = archiveOffset;
+        setArchiveSelectedId((current) => next.data.trials!.some((trial) => trial.id === current) ? current : next.data.trials![0]?.id ?? "");
+      }
       setArchiveError(next.failed.length ? `Archive data temporarily unavailable: ${next.failed.join(", ")}.` : "");
-    }).catch(() => { if (active) setArchiveError("Archive data temporarily unavailable."); });
+    }).catch(() => { if (active) setArchiveError("Archive data temporarily unavailable."); })
+      .finally(() => { if (active) setArchiveLoading(false); });
     return () => { active = false; };
-  }, [page, archiveOffset]);
+  }, [page, archiveOffset, archiveRefreshKey]);
   useEffect(() => {
     if (page !== "archive" || !archivedSelected) return;
     let active = true;
@@ -161,7 +169,7 @@ export default function App() {
         });
       });
     return () => { active = false; };
-  }, [page, archivedSelected?.id, archivedSelected?.entries.join("|")]);
+  }, [page, archivedSelected?.id, archivedSelected?.entries.join("|"), archiveRefreshKey]);
 
   const copy = async (label: string, value: string) => {
     try { await navigator.clipboard.writeText(value); setCopied(label); window.setTimeout(() => setCopied(""), 2000); }
@@ -227,7 +235,7 @@ export default function App() {
 
       {page === "ranking" && <section className="content-section ranking-section"><div className="section-heading"><div><span className="tiny-label">PERFORMANCE, NOT POPULARITY</span><h2>Rankings<span className="accent-dot">.</span></h2></div><button className="text-button" onClick={() => void refresh()} disabled={loading || !configured}><RefreshCw size={15} className={loading ? "spin" : ""} /> Refresh</button></div><p className="section-intro">Finalized official trials count here. Community scores stay with each trial.</p><div className="ranking-board"><div className="ranking-head"><span>RANK / AGENT</span><span>TRIALS</span><span>POINTS</span></div>{agents.length ? agents.map((agent: Agent, index) => <div className="ranking-row" key={agent.address}><span className="ranking-position">{String(index + 1).padStart(2, "0")}</span><span className="ranking-avatar">{agent.name.slice(0, 2).toUpperCase()}</span><span className="ranking-name"><strong>{agent.name}</strong><small>{short(agent.address)}</small></span><span className="ranking-trials">{agent.scored_trials}</span><strong className="ranking-points">{agent.points}</strong></div>) : <div className="empty-results">No finalized official scores yet.</div>}</div><p className="ranking-note"><ShieldCheck size={15} /> Rankings read final contract state. Unfinalized scores are not included.</p></section>}
 
-      {page === "archive" && <section className="content-section ranking-section"><div className="section-heading"><div><span className="tiny-label">PREVIOUS STUDIONET DEPLOYMENT</span><h2>Archive<span className="accent-dot">.</span></h2></div></div>
+      {page === "archive" && <section className="content-section ranking-section"><div className="section-heading"><div><span className="tiny-label">PREVIOUS STUDIONET DEPLOYMENT</span><h2>Archive<span className="accent-dot">.</span></h2></div><button className="text-button" onClick={() => setArchiveRefreshKey((key) => key + 1)} disabled={archiveLoading}><RefreshCw size={15} className={archiveLoading ? "spin" : ""} /> Retry</button></div>
         <p className="section-intro">Earlier trials and scores remain readable here. New entries use the current arena.</p>
         <p className="ranking-note"><ShieldCheck size={15} /> Contract {short(ARCHIVE_CONTRACT_ADDRESS)}</p>
         {archiveError && <div role="alert" className="flash error">{archiveError}</div>}

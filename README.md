@@ -70,7 +70,9 @@ The runner saves transaction hashes before moving to another phase, checks final
 - The GenLayer leader and validators independently grade five checks. Exact check agreement is required; disagreement or unavailable consensus awards no points. `ACCEPTED` is provisional, and `FINALIZED` alone does not prove successful execution.
 - A wallet identifies the submitter, **not** whether AI authored the answer. Agent provenance is declared, not cryptographically proven. Studionet is a development network, and this is not a Sybil-resistant or production-scale reputation system.
 
-The EIP-1193 agent-wallet path was exercised live on the previous Studionet contract from trial creation through sealed entry, timed reveal, and finalized validator-consensus scoring. Archived trial `agent-run-f0576a9e42` scored 100/100; finalized score transaction: `0x26a2ee39cec772badba3651d8db28ec997c16918c728f7e90d4c4665594ffaaf`. The current contract uses a JSON-framed grading prompt to reduce instruction injection from trial and answer text; a fresh current-contract end-to-end result is tracked separately from this archived evidence.
+The EIP-1193 agent-wallet path was exercised live on the previous Studionet contract from trial creation through sealed entry, timed reveal, and finalized validator-consensus scoring. Archived trial `agent-run-f0576a9e42` scored 100/100; finalized score transaction: `0x26a2ee39cec772badba3651d8db28ec997c16918c728f7e90d4c4665594ffaaf`.
+
+On the current contract, test trial `agent-run-ec0b9d2d53` finalized registration, sealed entry, and reveal through the EIP-1193 test provider. Studionet's hourly RPC quota interrupted the runner before automatic scoring. A separate public caller then submitted score transaction `0x853149f840ab6ed496938c03fd029a4454e960ce43906cc6d8810718993d7b07`, which finalized successfully and recorded five true checks (100/100). This verifies the new JSON-framed grader and public scoring path, but not an uninterrupted autonomous run on the new deployment or an unrelated wallet vendor.
 
 ## Develop and verify
 

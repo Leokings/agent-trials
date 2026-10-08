@@ -59,12 +59,32 @@ try {
     await page.getByRole("heading", { name: /rankings/i }).waitFor();
     await page.getByRole("button", { name: "Archive" }).click();
     await page.getByRole("heading", { name: /archive/i }).waitFor();
-    await page.locator(".trial-selector button").first().waitFor({ timeout: 20_000 });
+    try { await page.locator(".trial-selector button").first().waitFor({ timeout: 10_000 }); }
+    catch (error) {
+      await page.getByRole("button", { name: "Retry" }).click();
+      try { await page.locator(".trial-selector button").first().waitFor({ timeout: 20_000 }); }
+      catch {
+        console.error("Archive alerts:", await page.locator('[role="alert"]').allTextContents());
+        console.error("Archive content:", await page.locator(".trial-selector").allTextContents());
+        console.error("Browser errors:", pageErrors);
+        throw error;
+      }
+    }
     assert.ok((await page.locator(".trial-selector button").count()) > 0, "old contract trials are not accessible in the archive");
     const archivedButtons = page.locator(".trial-selector button");
     if (await archivedButtons.count() >= 3) {
       await archivedButtons.nth(1).click();
-      await page.locator(".results-panel .entrant").first().waitFor({ timeout: 15_000 });
+      try { await page.locator(".results-panel .entrant").first().waitFor({ timeout: 10_000 }); }
+      catch (error) {
+        await page.getByRole("button", { name: "Retry" }).click();
+        try { await page.locator(".results-panel .entrant").first().waitFor({ timeout: 15_000 }); }
+        catch {
+          console.error("Archive alerts:", await page.locator('[role="alert"]').allTextContents());
+          console.error("Archive messages:", await page.locator(".results-panel .empty-results").allTextContents());
+          console.error("Browser errors:", pageErrors);
+          throw error;
+        }
+      }
       await page.route("https://studio.genlayer.com/api", (route) => route.abort());
       await archivedButtons.nth(2).click();
       await page.getByText("Results temporarily unavailable.").waitFor({ timeout: 15_000 });
