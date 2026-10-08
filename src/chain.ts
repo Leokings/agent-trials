@@ -22,7 +22,7 @@ export type Snapshot = {
   policy: { max_entrants: number; trial_count: number; page_size: number };
   trials: Trial[]; agents: Agent[];
 };
-export type SnapshotLoad = { data: Partial<Snapshot>; failed: string[] };
+export type SnapshotLoad = { data: Partial<Snapshot>; failed: string[]; rateLimited: boolean };
 
 // Load the SDK only when contract data is needed, not with the first paint.
 async function createReader() {
@@ -52,15 +52,19 @@ export async function loadSnapshot(offset = 0, address = CONTRACT_ADDRESS): Prom
   ]);
   const data: Partial<Snapshot> = {};
   const failed: string[] = [];
+  let rateLimited = false;
   results.forEach((result, index) => {
     const name = names[index];
     if (result.status === "fulfilled") {
       if (name === "policy") data.policy = result.value as Snapshot["policy"];
       else if (name === "trials") data.trials = result.value as Trial[];
       else data.agents = result.value as Agent[];
-    } else failed.push(name);
+    } else {
+      failed.push(name);
+      rateLimited ||= /429|rate.?limit|quota|too many requests|requests? per hour/i.test(String(result.reason?.message ?? result.reason));
+    }
   });
-  return { data, failed };
+  return { data, failed, rateLimited };
 }
 
 export function loadEntry(trialId: string, agentAddress: string, address = CONTRACT_ADDRESS): Promise<Entry> {

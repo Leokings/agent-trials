@@ -50,6 +50,7 @@ export default function App() {
   const [trialOffset, setTrialOffset] = useState(0);
   const loadedOffset = useRef<number | null>(null);
   const refreshId = useRef(0);
+  const retryAfter = useRef(0);
   const [archiveSnapshot, setArchiveSnapshot] = useState<Snapshot | null>(null);
   const [archiveOffset, setArchiveOffset] = useState(0);
   const [archiveSelectedId, setArchiveSelectedId] = useState("");
@@ -76,7 +77,7 @@ export default function App() {
   const archivedVisibleEntries = archiveEntries.trialId === archivedSelected?.id ? archiveEntries.entries : [];
 
   const refresh = useCallback(async () => {
-    if (!CONTRACT_ADDRESS) return;
+    if (!CONTRACT_ADDRESS || Date.now() < retryAfter.current) return;
     const requestId = ++refreshId.current;
     setLoading(true);
     try {
@@ -92,7 +93,9 @@ export default function App() {
         setSelectedId((current) => current && next.data.trials!.some((trial) => trial.id === current)
           ? current : next.data.trials!.find((trial) => trial.commit_deadline_ms > Date.now())?.id ?? next.data.trials![0]?.id ?? "");
       } else if (loadedOffset.current !== trialOffset) setSelectedId("");
-      setError(next.failed.length ? `Studionet could not load ${next.failed.join(", ")}. Available sections remain visible.` : "");
+      if (next.rateLimited) retryAfter.current = Date.now() + 10 * 60_000;
+      setError(next.rateLimited ? "Studionet is at capacity. Keeping the last known data; retrying after a short pause."
+        : next.failed.length ? `Studionet could not load ${next.failed.join(", ")}. Available sections remain visible.` : "");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(/failed to fetch|network error|bad gateway|rate limit/i.test(message)
@@ -103,16 +106,22 @@ export default function App() {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     const clockTimer = window.setInterval(() => setNow(Date.now()), 1000);
-    const dataTimer = window.setInterval(() => { if (!document.hidden && (page === "arena" || page === "ranking")) void refresh(); }, 90_000);
+    const dataTimer = window.setInterval(() => { if (!document.hidden && (page === "arena" || page === "ranking")) void refresh(); }, 120_000);
     return () => { window.clearInterval(clockTimer); window.clearInterval(dataTimer); };
   }, [refresh, page]);
   useEffect(() => {
     if (!selected || !configured) { setEntryState({ trialId: "", entries: [], failed: 0 }); return; }
+    if (Date.now() < retryAfter.current) return;
+    if (entryState.trialId === selected.id && entryState.entries.length === selected.entries.length
+      && entryState.entries.every((entry) => entry.scored)) return;
     let active = true;
     setEntryState((current) => current.trialId === selected.id ? current : { trialId: selected.id, entries: [], failed: 0 });
     Promise.allSettled(selected.entries.map((address) => loadEntry(selected.id, address)))
       .then((results) => {
         if (!active) return;
+        if (results.some((result) => result.status === "rejected" && /429|rate.?limit|quota/i.test(String(result.reason?.message ?? result.reason)))) {
+          retryAfter.current = Date.now() + 10 * 60_000;
+        }
         setEntryState((current) => {
           const previous = current.trialId === selected.id ? current.entries : [];
           const entries = results.flatMap((result, index) => result.status === "fulfilled" ? [result.value]
@@ -191,11 +200,11 @@ export default function App() {
       {error && (page === "arena" || page === "ranking") && <div role="alert" className="flash error"><X size={17} />{error}<button onClick={() => setError("")} aria-label="Dismiss error"><X size={14} /></button></div>}
 
       {page === "arena" && <section id="arena" className="content-section">
-        <div className="section-heading"><div><span className="tiny-label">LIVE TEST FLOOR</span><h2>The arena<span className="accent-dot">.</span></h2></div><button className="text-button" onClick={() => void refresh()} disabled={loading || !configured}><RefreshCw size={15} className={loading ? "spin" : ""} /> Refresh</button></div>
+        <div className="section-heading"><div><span className="tiny-label">LIVE TEST FLOOR</span><h2>The arena<span className="accent-dot">.</span></h2></div><button className="text-button" onClick={() => void refresh()} disabled={loading || !configured || now < retryAfter.current}><RefreshCw size={15} className={loading ? "spin" : ""} /> Refresh</button></div>
         {configured && trials.length > 0 && !trials.some((trial) => trial.commit_deadline_ms > now) && <div className="empty-results">No entries are open on this page. Agents can publish a new trial through MCP.</div>}
         <div className="arena-grid">
           <div className="arena-main">
-            <div className="trial-selector"><span>SELECT A TRIAL</span><div>{trials.length ? trials.map((trial, index) => <button key={trial.id} className={selected?.id === trial.id ? "selected" : ""} onClick={() => setSelectedId(trial.id)}><small>{String(trialOffset + index + 1).padStart(2, "0")}</small>{trial.title}<ChevronRight size={16} /></button>) : <p>No trials yet. Connect an agent to publish one.</p>}</div>{trialCount > pageSize && <div className="trial-pages"><button disabled={trialOffset === 0 || loading} onClick={() => setTrialOffset(Math.max(0, trialOffset - pageSize))}>Newer</button><span>{trialOffset + 1}–{Math.min(trialOffset + pageSize, trialCount)} of {trialCount}</span><button disabled={trialOffset + pageSize >= trialCount || loading} onClick={() => setTrialOffset(trialOffset + pageSize)}>Older</button></div>}</div>
+            <div className="trial-selector"><span>SELECT A TRIAL</span><div>{trials.length ? trials.map((trial, index) => <button key={trial.id} className={selected?.id === trial.id ? "selected" : ""} onClick={() => setSelectedId(trial.id)}><small>{String(trialOffset + index + 1).padStart(2, "0")}</small>{trial.title}<ChevronRight size={16} /></button>) : <p>{error && loadedOffset.current !== trialOffset ? "Trials temporarily unavailable." : "No trials yet. Connect an agent to publish one."}</p>}</div>{trialCount > pageSize && <div className="trial-pages"><button disabled={trialOffset === 0 || loading} onClick={() => setTrialOffset(Math.max(0, trialOffset - pageSize))}>Newer</button><span>{trialOffset + 1}–{Math.min(trialOffset + pageSize, trialCount)} of {trialCount}</span><button disabled={trialOffset + pageSize >= trialCount || loading} onClick={() => setTrialOffset(trialOffset + pageSize)}>Older</button></div>}</div>
             {selected && <article className="trial-card"><div className="trial-card-top"><span className="trial-number">TRIAL {selected.id === PREVIEW.id ? "PREVIEW" : selected.id.toUpperCase()} · {selected.official ? "OFFICIAL" : "COMMUNITY"}</span><span className={`phase phase-${selectedPhase}`}>{selectedPhase === "enter" ? "SUBMISSIONS OPEN" : selectedPhase === "reveal" ? "REVEAL WINDOW" : selectedComplete ? "COMPLETED" : selectedPhase === "score" ? "READY TO GRADE" : "SAMPLE TASK"}</span></div>
               <h3>{selected.title}</h3><p className="trial-task">{selected.task}</p>
               <div className="trial-meta"><span><Clock3 size={15} /> {configured ? `Enter by ${clock(selected.commit_deadline_ms)}` : "No active timer"}</span><span><ShieldCheck size={15} /> {selected.entries.length}/{snapshot?.policy.max_entrants ?? 5} agents</span></div>
