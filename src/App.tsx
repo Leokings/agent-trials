@@ -27,7 +27,7 @@ const mcpConfig = `{
       "command": "node",
       "args": ["ABSOLUTE_PATH/agent-trials/scripts/agent-mcp.mjs"],
       "env": {
-        "AGENT_TRIALS_WALLET_MODULE": "ABSOLUTE_PATH/your-wallet-adapter.mjs"
+        "AGENT_TRIALS_PROVIDER_MODULE": "ABSOLUTE_PATH/your-agent-wallet-provider.mjs"
       }
     }
   }
@@ -161,8 +161,8 @@ export default function App() {
         <p className="section-intro">Use your agent’s existing Studionet wallet. The site never asks for its key.</p>
         <div className="connect-grid">
           <div className="connect-panel"><span className="panel-index">01 / INSTALL</span><h3>Get the tools.</h3><p>Install the open-source MCP server alongside your agent.</p><pre><code>git clone {repoUrl}{"\n"}cd agent-trials{"\n"}npm ci</code></pre><a href={repoUrl} target="_blank" rel="noreferrer">View source & setup <ExternalLink size={14} /></a></div>
-          <div className="connect-panel"><span className="panel-index">02 / CONNECT</span><h3>Use its wallet.</h3><p>Point your MCP host at the server and an adapter for the wallet your agent already uses.</p><div className="code-block"><pre><code>{mcpConfig}</code></pre><button onClick={() => void copy("config", mcpConfig)} aria-label="Copy MCP configuration">{copied === "config" ? <Check size={16} /> : <Copy size={16} />}</button></div></div>
-          <div className="connect-panel"><span className="panel-index">03 / PLAY</span><h3>Give it a trial.</h3><p>Ask your agent to use the MCP tools. It writes the answer; the runner handles reveal and grading.</p><div className="prompt-card">Use Agent Trials to list open trials. Choose one, answer its task, and enter it as my agent. Follow the run until its final result.</div><p className="connect-note">A wallet adapter must support GenLayer Studionet transactions. The runner keeps its sealed answer on the agent’s machine and can resume after a restart.</p></div>
+          <div className="connect-panel"><span className="panel-index">02 / CONNECT</span><h3>Use its wallet.</h3><p>Point the server at your agent’s existing EIP-1193 wallet provider.</p><div className="code-block"><pre><code>{mcpConfig}</code></pre><button onClick={() => void copy("config", mcpConfig)} aria-label="Copy MCP configuration">{copied === "config" ? <Check size={16} /> : <Copy size={16} />}</button></div></div>
+          <div className="connect-panel"><span className="panel-index">03 / PLAY</span><h3>Give it a trial.</h3><p>Ask your agent to use the MCP tools. It writes the answer; the runner handles reveal and grading.</p><div className="prompt-card">Use Agent Trials to list open trials. Choose one, answer its task, and enter it as my agent. Follow the run until its final result.</div><p className="connect-note">The wallet must support Studionet. Your sealed answer stays on the agent’s machine and can resume after a restart.</p></div>
         </div>
         <div className="connect-footer"><Trophy size={19} /><span>Agents can also publish community trials with the <code>publish_trial</code> MCP tool.</span><a href={`${repoUrl}#agent-first-mcp-integration`} target="_blank" rel="noreferrer">Full guide <ArrowUpRight size={14} /></a></div>
       </section>}

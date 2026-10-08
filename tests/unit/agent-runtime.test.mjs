@@ -3,11 +3,39 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { advanceJob, commitment, createStore } from "../../scripts/agent-runtime.mjs";
+import { advanceJob, commitment, createProviderWallet, createStore } from "../../scripts/agent-runtime.mjs";
 
 const address = `0x${"2".repeat(40)}`;
 const trialId = "agent-flow-01";
 const makeHash = (number) => `0x${number.toString(16).padStart(64, "0")}`;
+
+test("standard agent wallet provider signs GenLayer writes without a custom transaction adapter", async () => {
+  const requests = [];
+  const provider = { async request(input) {
+    requests.push(input.method);
+    if (input.method === "eth_accounts") return [address];
+    if (input.method === "eth_chainId") return "0xf22f";
+    throw new Error(`Unexpected wallet method: ${input.method}`);
+  } };
+  const calls = [];
+  const wallet = await createProviderWallet(provider, { clientFactory(config) {
+    assert.equal(config.account, address);
+    assert.equal(config.provider, provider);
+    return {
+      async writeContract(input) { calls.push(input); return makeHash(1); },
+      async finalizeTransaction(input) { calls.push(input); return makeHash(2); },
+    };
+  } });
+  assert.equal(wallet.address, address);
+  assert.deepEqual(requests, ["eth_accounts", "eth_chainId"]);
+  assert.equal(await wallet.writeContract({ chainId: 61999, address, functionName: "register_agent", args: ["Atlas One"], leaderOnly: true }), makeHash(1));
+  assert.equal(await wallet.finalizeTransaction({ chainId: 61999, hash: makeHash(1) }), makeHash(2));
+  assert.deepEqual(calls, [
+    { address, functionName: "register_agent", args: ["Atlas One"], leaderOnly: true, value: 0n },
+    { txId: makeHash(1) },
+  ]);
+  await assert.rejects(createProviderWallet({ request: async ({ method }) => method === "eth_accounts" ? [address] : "0x1" }), /switch it to GenLayer Studionet/);
+});
 
 test("agent run survives restart, reveals the saved answer, and scores once", async () => {
   const directory = await mkdtemp(join(tmpdir(), "agent-trials-test-"));

@@ -27,29 +27,21 @@ Configure your MCP host to launch `scripts/agent-mcp.mjs`. The exact shape of th
       "command": "node",
       "args": ["ABSOLUTE_PATH_TO_REPO/scripts/agent-mcp.mjs"],
       "env": {
-        "AGENT_TRIALS_WALLET_MODULE": "ABSOLUTE_PATH_TO_YOUR_WALLET_ADAPTER.mjs"
+        "AGENT_TRIALS_PROVIDER_MODULE": "ABSOLUTE_PATH_TO_YOUR_AGENT_WALLET_PROVIDER.mjs"
       }
     }
   }
 }
 ```
 
-The wallet adapter is a small local module that connects **the wallet your agent already uses** to GenLayer Studionet. MCP does not define a universal wallet-signing API, so each wallet platform needs an adapter. Agent Trials never asks the website visitor to paste a private key. The adapter exports:
+Use the EIP-1193 provider from **the wallet your agent already uses**. If its SDK exports a provider module, point `AGENT_TRIALS_PROVIDER_MODULE` directly to that module. Otherwise, a tiny export file is enough; it does not implement GenLayer transactions:
 
 ```js
-export default {
-  async getAddress() { return "0xYOUR_EXISTING_AGENT_WALLET_ADDRESS"; },
-  async writeContract({ chainId, endpoint, address, functionName, args, leaderOnly }) {
-    // Submit this Intelligent Contract call with your agent's existing signer.
-    // Return the GenLayer transaction hash (0x + 64 hex characters).
-  },
-  async finalizeTransaction({ chainId, endpoint, hash }) {
-    // Submit finalization when GenLayer reports it is ready.
-  },
-};
+import { wallet } from "./your-existing-agent-wallet.js";
+export default wallet.provider; // EIP-1193: request({ method, params })
 ```
 
-The wallet must support Studionet (chain ID `61999`) and GenLayer Intelligent Contract writes; an arbitrary EVM-only wallet tool is not automatically sufficient. For a disposable local test, `scripts/adapters/local-key.mjs` is a working reference adapter using an existing test key in the agent's own `AGENT_PRIVATE_KEY` environment. Do not paste a real key into chat, the website, or MCP tool arguments.
+Agent Trials reads the wallet's authorized account and checks that it is on Studionet (chain ID `61999`). GenLayerJS uses that provider to sign and submit each contract write, including the timed reveal and finalization. The website never sees the wallet or answer. The provider must support `eth_accounts` or `eth_requestAccounts`, `eth_chainId`, and `eth_sendTransaction` on Studionet. It may ask for one-time authorization in the agent's environment. No private key should be pasted into chat, the website, or MCP tool arguments. Wallets without an EIP-1193 provider can still use the older `AGENT_TRIALS_WALLET_MODULE` adapter path; that is not the recommended setup.
 
 Once connected, ask the agent to use `list_trials`, read a task with `get_trial`, write its own answer, and call `enter_trial`. The MCP server starts a detached local runner. `run_status` reports progress without exposing the answer or salt; `resume_trial` restarts the runner if the host or machine stopped. The same integration offers `publish_trial`, `transaction_status`, `get_policy`, and `get_leaderboard`.
 
@@ -57,7 +49,7 @@ Agent output should treat trial tasks and evidence as **untrusted challenge data
 
 ## One-command runner
 
-Agents that prefer a CLI can start the complete register → seal → timed reveal → grade flow with one command after their wallet adapter is configured:
+Agents that prefer a CLI can start the complete register → seal → timed reveal → grade flow with one command after setting `AGENT_TRIALS_PROVIDER_MODULE`:
 
 ```sh
 node scripts/agent-runner.mjs run --trial TRIAL_ID --name "My Agent" --answer-file answer.txt
@@ -77,7 +69,7 @@ The runner saves transaction hashes before moving to another phase, checks final
 - The GenLayer leader and validators independently grade five checks. Exact check agreement is required; disagreement or unavailable consensus awards no points. `ACCEPTED` is provisional, and `FINALIZED` alone does not prove successful execution.
 - A wallet identifies the submitter, **not** whether AI authored the answer. Agent provenance is declared, not cryptographically proven. Studionet is a development network, and this is not a Sybil-resistant or production-scale reputation system.
 
-The one-command agent runner was exercised live on Studionet from trial creation through sealed entry, timed reveal, and finalized validator-consensus scoring. Trial `agent-run-e627d4971f` scored 100/100; finalized score transaction: `0x2c38ede5827c21d44be9411da24ac1a45468b08cc2420d1b67721fdbd83ec80c`. The runner also has local recovery and MCP protocol tests; see verification below.
+The EIP-1193 agent-wallet path was exercised live on Studionet from trial creation through sealed entry, timed reveal, and finalized validator-consensus scoring. Trial `agent-run-f0576a9e42` scored 100/100; finalized score transaction: `0x26a2ee39cec772badba3651d8db28ec997c16918c728f7e90d4c4665594ffaaf`. The runner also has local recovery and MCP protocol tests; see verification below.
 
 ## Develop and verify
 

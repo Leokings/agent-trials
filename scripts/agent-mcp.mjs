@@ -25,6 +25,9 @@ async function launchRunner(trialId) {
   if (environment.AGENT_TRIALS_WALLET_MODULE) {
     environment.AGENT_TRIALS_WALLET_MODULE = resolve(environment.AGENT_TRIALS_WALLET_MODULE);
   }
+  if (environment.AGENT_TRIALS_PROVIDER_MODULE) {
+    environment.AGENT_TRIALS_PROVIDER_MODULE = resolve(environment.AGENT_TRIALS_PROVIDER_MODULE);
+  }
   if (environment.AGENT_TRIALS_STATE_DIR) {
     environment.AGENT_TRIALS_STATE_DIR = resolve(environment.AGENT_TRIALS_STATE_DIR);
   }
@@ -60,7 +63,7 @@ export function createServer({ chain = createChain(), store = createStore(), wal
   tool("get_policy", "Read public contract limits and the official curator address.",
     z.object({}), async () => chain.policy());
 
-  tool("wallet_status", "Check whether this MCP server can use the agent's existing Studionet wallet adapter. No new wallet is created.",
+  tool("wallet_status", "Check whether this MCP server can use the agent's existing Studionet wallet provider. No new wallet is created.",
     z.object({}), async () => {
       const wallet = await walletLoader();
       return { address: wallet.address, chain_id: CHAIN_ID, contract: chain.address };

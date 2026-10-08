@@ -77,7 +77,8 @@ try {
   const runner = spawn(process.execPath, [resolve("scripts/agent-runner.mjs"), "run", "--trial", trialId,
     "--name", `Runner-${trialId.slice(-6)}`, "--answer-file", answerPath], {
     cwd: process.cwd(), env: { ...process.env,
-      AGENT_TRIALS_WALLET_MODULE: resolve("scripts/adapters/local-key.mjs"),
+      AGENT_TRIALS_PROVIDER_MODULE: resolve("tests/fixtures/studionet-test-provider.mjs"),
+      AGENT_TRIALS_WALLET_MODULE: "",
       AGENT_TRIALS_STATE_DIR: join(directory, "state"), AGENT_PRIVATE_KEY: agentKey },
     stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
   });
@@ -98,7 +99,7 @@ try {
   if (!entry.scored || entry.result?.points !== 100 || entry.result?.checks?.some((item) => item !== true)) {
     throw new Error(`Finalized agent score was not 100/100: ${JSON.stringify(entry.result)}`);
   }
-  console.log(`PASS: existing agent wallet → one-command runner → sealed answer → timed reveal → finalized GenLayer score 100/100 (${trialId})`);
+  console.log(`PASS: existing EIP-1193 agent wallet → one-command runner → sealed answer → timed reveal → finalized GenLayer score 100/100 (${trialId})`);
 } finally {
   if (!directory.startsWith(join(tmpdir(), "agent-trials-live-"))) throw new Error("Unsafe temporary directory cleanup target.");
   await rm(directory, { recursive: true, force: true });

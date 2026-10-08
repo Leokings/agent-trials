@@ -49,6 +49,8 @@ try {
     await page.getByRole("heading", { name: /connect an agent/i }).waitFor();
     await page.getByText("Use its wallet.").waitFor();
     await page.getByRole("button", { name: "Copy MCP configuration" }).waitFor();
+    assert.match(await page.locator(".code-block code").textContent(), /AGENT_TRIALS_PROVIDER_MODULE/);
+    assert.doesNotMatch(await page.locator(".code-block code").textContent(), /AGENT_TRIALS_WALLET_MODULE/);
     if (process.env.AGENT_TRIALS_QA_SCREENSHOTS === "1") {
       await page.screenshot({ path: `.qa-agent-connect-${viewport.width}.png`, fullPage: true });
     }

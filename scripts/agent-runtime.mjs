@@ -70,10 +70,48 @@ export function createChain({ endpoint = ENDPOINT, address = CONTRACT_ADDRESS } 
   };
 }
 
-export async function loadWalletAdapter(modulePath = process.env.AGENT_TRIALS_WALLET_MODULE) {
-  if (!modulePath) throw new Error("Set AGENT_TRIALS_WALLET_MODULE to an adapter for your agent's existing Studionet wallet.");
+async function loadModule(modulePath) {
   const path = isAbsolute(modulePath) ? modulePath : resolve(modulePath);
-  const imported = await import(pathToFileURL(path).href);
+  return import(pathToFileURL(path).href);
+}
+
+export async function createProviderWallet(provider, { endpoint = ENDPOINT, clientFactory = createClient } = {}) {
+  if (!provider || typeof provider.request !== "function") {
+    throw new Error("The agent wallet must expose an EIP-1193 provider with request({ method, params }).");
+  }
+  let accounts = await provider.request({ method: "eth_accounts" });
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    accounts = await provider.request({ method: "eth_requestAccounts" });
+  }
+  const address = assertAddress(accounts?.[0]);
+  const walletChain = await provider.request({ method: "eth_chainId" });
+  if (Number(BigInt(walletChain)) !== CHAIN_ID) {
+    throw new Error(`Agent wallet is on chain ${walletChain}; switch it to GenLayer Studionet (${CHAIN_ID}).`);
+  }
+  const client = clientFactory({ chain: studionet, endpoint, account: address, provider });
+  return {
+    address,
+    writeContract: ({ chainId, address: contract, functionName, args, leaderOnly }) => {
+      if (chainId !== CHAIN_ID) throw new Error("Wrong network for Agent Trials.");
+      return client.writeContract({ address: contract, functionName, args, leaderOnly, value: 0n });
+    },
+    finalizeTransaction: ({ chainId, hash }) => {
+      if (chainId !== CHAIN_ID) throw new Error("Wrong network for Agent Trials.");
+      return client.finalizeTransaction({ txId: hash });
+    },
+  };
+}
+
+export async function loadWalletAdapter(modulePath = process.env.AGENT_TRIALS_WALLET_MODULE) {
+  const providerPath = process.env.AGENT_TRIALS_PROVIDER_MODULE;
+  if (providerPath) {
+    const imported = await loadModule(providerPath);
+    const candidate = imported.default ?? imported.provider ?? imported.getProvider;
+    const provider = typeof candidate === "function" ? await candidate() : candidate;
+    return createProviderWallet(provider);
+  }
+  if (!modulePath) throw new Error("Set AGENT_TRIALS_PROVIDER_MODULE to your existing agent wallet's EIP-1193 provider module.");
+  const imported = await loadModule(modulePath);
   const wallet = imported.default ?? imported;
   if (typeof wallet.getAddress !== "function" || typeof wallet.writeContract !== "function"
       || typeof wallet.finalizeTransaction !== "function") {

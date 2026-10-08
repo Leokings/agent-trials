@@ -32,7 +32,8 @@ async function main() {
   node scripts/agent-runner.mjs run --trial TRIAL_ID    # resume a saved run
   node scripts/agent-runner.mjs status --trial TRIAL_ID
 
-Set AGENT_TRIALS_WALLET_MODULE to a local adapter for your existing Studionet wallet.
+Set AGENT_TRIALS_PROVIDER_MODULE to a module exporting your existing agent wallet's EIP-1193 provider.
+AGENT_TRIALS_WALLET_MODULE remains available for non-standard wallets.
 The runner stays active through reveal and scoring; rerun the same command after a restart.
 The answer and salt are encrypted in the local state directory, never sent to this website.`);
     return;
