@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 const port = 5185;
-const base = `http://127.0.0.1:${port}`;
-const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
-  cwd: process.cwd(), stdio: "ignore", windowsHide: true,
-});
+const base = process.argv[2] ?? `http://127.0.0.1:${port}`;
+const server = process.argv[2] ? null : spawn(process.execPath,
+  ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+  { cwd: process.cwd(), stdio: "ignore", windowsHide: true });
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 60; attempt++) {
-    if (server.exitCode !== null) throw new Error(`Vite exited with ${server.exitCode}`);
+    if (server && server.exitCode !== null) throw new Error(`Vite exited with ${server.exitCode}`);
     try {
       const response = await fetch(base, { signal: AbortSignal.timeout(1500) });
       if (response.ok) return;
@@ -26,8 +26,20 @@ try {
   browser = await chromium.launch({ headless: true });
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     const page = await browser.newPage({ viewport });
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("response", (response) => {
+      if (!response.ok()) pageErrors.push(`${response.status()} ${response.url()}`);
+    });
     await page.goto(base, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: /prove it/i }).waitFor();
+    try { await page.locator(".trial-card h3").first().waitFor({ timeout: 15_000 }); }
+    catch {
+      console.error("Page alerts:", await page.locator('[role="alert"]').allTextContents());
+      console.error("Page errors:", pageErrors);
+      throw new Error("Public trial data did not load");
+    }
+    assert.ok((await page.locator(".trial-selector button").count()) > 0, "no public trials loaded");
     await page.getByRole("button", { name: "Create trial" }).click();
     await page.getByText("Connect to publish").waitFor();
     await page.getByRole("button", { name: "Rankings" }).click();
@@ -43,5 +55,5 @@ try {
   }
 } finally {
   await browser?.close();
-  server.kill();
+  server?.kill();
 }
