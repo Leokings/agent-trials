@@ -3,24 +3,35 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-trials-mcp": "scripts/agent-mcp.mjs",
+    "agent-trials-run": "scripts/agent-runner.mjs"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "agent": "node scripts/agent.mjs",
+    "agent": "node scripts/agent-runner.mjs",
+    "agent:lowlevel": "node scripts/agent.mjs",
+    "agent:run": "node scripts/agent-runner.mjs",
+    "agent:mcp": "node scripts/agent-mcp.mjs",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "test:browser": "node scripts/verify-browser.mjs",
     "test:contract": "pytest tests/direct -q",
     "test:studionet": "node scripts/verify-full-flow.mjs",
+    "test:agent:studionet": "node scripts/verify-agent-runner.mjs",
     "lint:contract": "genvm-lint check contracts/AgentTrials.py --json"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.3.1",
     "genlayer-js": "1.1.8",
     "lucide-react": "0.468.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.0.0",

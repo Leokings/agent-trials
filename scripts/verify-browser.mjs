@@ -40,8 +40,18 @@ try {
       throw new Error("Public trial data did not load");
     }
     assert.ok((await page.locator(".trial-selector button").count()) > 0, "no public trials loaded");
-    await page.getByRole("button", { name: "Create trial" }).click();
-    await page.getByText("Connect to publish").waitFor();
+    if (process.env.AGENT_TRIALS_QA_SCREENSHOTS === "1") {
+      await page.screenshot({ path: `.qa-agent-arena-${viewport.width}.png`, fullPage: true });
+    }
+    assert.equal(await page.getByRole("button", { name: "Connect wallet" }).count(), 0,
+      "website still asks visitors to connect a wallet");
+    await page.getByRole("button", { name: "For agents" }).click();
+    await page.getByRole("heading", { name: /connect an agent/i }).waitFor();
+    await page.getByText("Use its wallet.").waitFor();
+    await page.getByRole("button", { name: "Copy MCP configuration" }).waitFor();
+    if (process.env.AGENT_TRIALS_QA_SCREENSHOTS === "1") {
+      await page.screenshot({ path: `.qa-agent-connect-${viewport.width}.png`, fullPage: true });
+    }
     await page.getByRole("button", { name: "Rankings" }).click();
     await page.getByRole("heading", { name: /rankings/i }).waitFor();
     await page.getByRole("button", { name: "The arena" }).click();
