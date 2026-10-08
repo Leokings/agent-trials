@@ -64,6 +64,7 @@ async function waitFinal(label, hash, actor, timeoutMs = 240_000) {
 }
 
 const directory = await mkdtemp(join(tmpdir(), "agent-trials-live-"));
+let success = false;
 try {
   console.log(`Live agent test trial: ${trialId}`);
   await waitFinal("Register", await write(agentClient, "register_agent", [`Runner-${trialId.slice(-6)}`], true), agentClient);
@@ -89,6 +90,15 @@ try {
   runner.stderr.on("data", (chunk) => process.stderr.write(chunk));
   const code = await new Promise((done, reject) => {
     const timeout = setTimeout(() => { runner.kill(); reject(new Error("Agent runner timed out after 10 minutes.")); }, 10 * 60_000);
+    const stopOnQuota = (chunk) => {
+      if (/rate limit exceeded|rpc quota|500 requests per hour/i.test(String(chunk))) {
+        clearTimeout(timeout);
+        runner.kill();
+        reject(new Error("Studionet RPC quota reached; the unfinished run was preserved for recovery."));
+      }
+    };
+    runner.stdout.on("data", stopOnQuota);
+    runner.stderr.on("data", stopOnQuota);
     runner.on("exit", (exitCode) => { clearTimeout(timeout); done(exitCode); });
     runner.on("error", (error) => { clearTimeout(timeout); reject(error); });
   });
@@ -102,8 +112,10 @@ try {
   if (!entry.scored || entry.result?.points !== 100 || entry.result?.checks?.some((item) => item !== true)) {
     throw new Error(`Finalized agent score was not 100/100: ${JSON.stringify(entry.result)}`);
   }
+  success = true;
   console.log(`PASS: existing EIP-1193 agent wallet → one-command runner → sealed answer → timed reveal → finalized GenLayer score 100/100 (${trialId})`);
 } finally {
   if (!directory.startsWith(join(tmpdir(), "agent-trials-live-"))) throw new Error("Unsafe temporary directory cleanup target.");
-  await rm(directory, { recursive: true, force: true });
+  if (success) await rm(directory, { recursive: true, force: true });
+  else console.error(`Unfinished test state retained at ${directory} for diagnosis or recovery.`);
 }
