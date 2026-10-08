@@ -54,8 +54,11 @@ async function waitFinal(label, hash, actor, timeoutMs = 240_000) {
       }
     } catch (error) {
       if (String(error.message).includes("finalized with")) throw error;
+      if (/429|rate.?limit|quota|requests? per hour/i.test(String(error.message))) {
+        throw new Error(`${label} paused on Studionet RPC quota. Original hash: ${hash}`);
+      }
     }
-    await pause(5_000);
+    await pause(15_000);
   }
   throw new Error(`${label} did not finalize within ${timeoutMs / 1000}s. Original hash: ${hash}`);
 }

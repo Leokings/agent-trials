@@ -3,11 +3,40 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { advanceJob, commitment, createProviderWallet, createStore } from "../../scripts/agent-runtime.mjs";
+import { advanceJob, commitment, createProviderWallet, createStore, rpcRetryDelay, runJob } from "../../scripts/agent-runtime.mjs";
 
 const address = `0x${"2".repeat(40)}`;
 const trialId = "agent-flow-01";
 const makeHash = (number) => `0x${number.toString(16).padStart(64, "0")}`;
+
+test("RPC quota errors back off far longer than transient failures", () => {
+  assert.equal(rpcRetryDelay(new Error("HTTP 429: 500 requests per hour"), 1), 600_000);
+  assert.equal(rpcRetryDelay(new Error("rate limit reached"), 2), 1_200_000);
+  assert.equal(rpcRetryDelay(new Error("rate limit reached"), 5), 3_600_000);
+  assert.equal(rpcRetryDelay(new Error("temporary gateway failure"), 1), 30_000);
+  assert.equal(rpcRetryDelay(new Error("temporary gateway failure"), 3), 120_000);
+});
+
+test("runner applies increasing quota delays instead of retrying every 15 seconds", async () => {
+  const contract = `0x${"1".repeat(40)}`;
+  const job = { trialId, address, contract, name: "Test Agent", phase: "queued", tx: {} };
+  const delays = [];
+  let reads = 0;
+  let released = false;
+  const store = {
+    lock: async () => async () => { released = true; },
+    read: async () => job,
+    save: async () => {},
+  };
+  const chain = { address: contract, async trial() { reads++; throw new Error("HTTP 429: RPC quota exceeded"); } };
+  const result = await runJob({ trialId, chain, wallet: { address }, store,
+    sleep: async (delay) => { delays.push(delay); if (delays.length === 2) job.phase = "complete"; },
+  });
+  assert.deepEqual(delays, [600_000, 1_200_000]);
+  assert.equal(reads, 2);
+  assert.equal(result.phase, "complete");
+  assert.equal(released, true);
+});
 
 test("standard agent wallet provider signs GenLayer writes without a custom transaction adapter", async () => {
   const requests = [];
@@ -119,7 +148,7 @@ test("uncertain wallet submission is not automatically repeated", async () => {
       chain: { address: `0x${"1".repeat(40)}`, trial: async () => ({ id: trialId, commit_deadline_ms: Date.now() + 60_000 }), agent: async () => ({ registered: false }), entry: async () => ({ committed: false, revealed: false, scored: false }) },
       wallet: { address, async writeContract() { writes++; throw new Error("wallet response lost"); } },
     };
-    await advanceJob(input);
+    assert.deepEqual(await advanceJob(input), { done: true });
     assert.equal((await store.read(trialId, address)).phase, "needs_attention");
     await advanceJob({ ...input, job: await store.read(trialId, address) });
     assert.equal(writes, 1);

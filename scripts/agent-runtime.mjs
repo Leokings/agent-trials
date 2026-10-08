@@ -16,6 +16,14 @@ const ADDRESS = /^0x[a-f0-9]{40}$/i;
 const TX_HASH = /^0x[a-f0-9]{64}$/i;
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 
+export function rpcRetryDelay(error, consecutiveFailures = 1) {
+  const message = String(error?.message ?? error).toLowerCase();
+  const limited = /(?:429|rate.?limit|quota|too many requests|requests? per hour)/.test(message);
+  const base = limited ? 10 * 60_000 : 30_000;
+  const cap = limited ? 60 * 60_000 : 5 * 60_000;
+  return Math.min(cap, base * 2 ** Math.min(6, Math.max(0, consecutiveFailures - 1)));
+}
+
 export function assertTrialId(value) {
   if (typeof value !== "string" || !TRIAL_ID.test(value)) throw new Error("Invalid trial ID");
   return value;
@@ -255,10 +263,13 @@ async function advanceTransaction(stage, intent, { job, chain, wallet, store, no
       await put(store, job, { phase: stage, error: null });
     } catch (error) {
       await put(store, job, { phase: "needs_attention", uncertainStage: stage, error: `${stage} submission uncertain: ${error.message}. Check the wallet and chain before retrying.` });
+      // A write may have reached the chain even when the RPC response was lost.
+      // Stop here rather than repeatedly reading or resubmitting through a quota error.
+      return { done: true };
     }
-    return { delay: 15_000 };
+    return { delay: 30_000 };
   }
-  if (previous.finalized) return { delay: 15_000 };
+  if (previous.finalized) return { delay: 30_000 };
   const outcome = await chain.transaction(previous.hash);
   if (outcome.status === "FINALIZED") {
     if (outcome.execution !== "FINISHED_WITH_RETURN") {
@@ -281,7 +292,7 @@ async function advanceTransaction(stage, intent, { job, chain, wallet, store, no
       }
     }
   }
-  return { delay: 15_000 };
+  return { delay: 30_000 };
 }
 
 export async function advanceJob({ job, chain, wallet, store, now = Date.now }) {
@@ -361,14 +372,17 @@ export async function advanceJob({ job, chain, wallet, store, now = Date.now }) 
 export async function runJob({ trialId, chain = createChain(), wallet, store = createStore(), now = Date.now, sleep = pause, onUpdate = () => {} }) {
   const release = await store.lock(trialId, wallet.address);
   try {
+    let consecutiveFailures = 0;
     for (;;) {
       const job = await store.read(trialId, wallet.address);
       if (!job) throw new Error("No saved run for this trial and wallet.");
       let step;
-      try { step = await advanceJob({ job, chain, wallet, store, now }); }
+      try { step = await advanceJob({ job, chain, wallet, store, now }); consecutiveFailures = 0; }
       catch (error) {
-        await put(store, job, { error: `Waiting after RPC error: ${error.message}` });
-        step = { delay: 15_000 };
+        consecutiveFailures++;
+        const delay = rpcRetryDelay(error, consecutiveFailures);
+        await put(store, job, { error: `Studionet read failed; retrying in ${Math.ceil(delay / 60_000)} minute(s): ${error.message}` });
+        step = { delay };
       }
       onUpdate(publicJob(await store.read(trialId, wallet.address)));
       if (step.done) return publicJob(await store.read(trialId, wallet.address));

@@ -33,13 +33,14 @@ try {
     });
     await page.goto(base, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: /prove it/i }).waitFor();
-    try { await page.locator(".trial-card h3").first().waitFor({ timeout: 15_000 }); }
+    try { await page.locator(".trial-selector").first().waitFor({ timeout: 15_000 }); }
     catch {
       console.error("Page alerts:", await page.locator('[role="alert"]').allTextContents());
       console.error("Page errors:", pageErrors);
-      throw new Error("Public trial data did not load");
+      throw new Error("Public arena did not load");
     }
-    assert.ok((await page.locator(".trial-selector button").count()) > 0, "no public trials loaded");
+    await page.waitForFunction(() => document.querySelector(".trial-selector button")
+      || document.querySelector(".trial-selector")?.textContent?.includes("No trials yet"), undefined, { timeout: 15_000 });
     if (process.env.AGENT_TRIALS_QA_SCREENSHOTS === "1") {
       await page.screenshot({ path: `.qa-agent-arena-${viewport.width}.png`, fullPage: true });
     }
@@ -56,13 +57,36 @@ try {
     }
     await page.getByRole("button", { name: "Rankings" }).click();
     await page.getByRole("heading", { name: /rankings/i }).waitFor();
+    await page.getByRole("button", { name: "Archive" }).click();
+    await page.getByRole("heading", { name: /archive/i }).waitFor();
+    await page.locator(".trial-selector button").first().waitFor({ timeout: 20_000 });
+    assert.ok((await page.locator(".trial-selector button").count()) > 0, "old contract trials are not accessible in the archive");
+    const archivedButtons = page.locator(".trial-selector button");
+    if (await archivedButtons.count() >= 3) {
+      await archivedButtons.nth(1).click();
+      await page.locator(".results-panel .entrant").first().waitFor({ timeout: 15_000 });
+      await page.route("https://studio.genlayer.com/api", (route) => route.abort());
+      await archivedButtons.nth(2).click();
+      await page.getByText("Results temporarily unavailable.").waitFor({ timeout: 15_000 });
+      assert.equal(await page.locator(".results-panel .entrant").count(), 0,
+        "switching trials reused another trial's entrant after a failed read");
+      await page.unroute("https://studio.genlayer.com/api");
+    }
     await page.getByRole("button", { name: "The arena" }).click();
     await page.getByRole("heading", { name: /the arena/i }).waitFor();
+    const existingTrialTitle = await page.locator(".trial-card h3").first().textContent().catch(() => null);
+    await page.route("https://studio.genlayer.com/api", (route) => route.abort());
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await page.getByRole("alert").waitFor({ timeout: 15_000 });
+    if (existingTrialTitle) assert.equal(await page.locator(".trial-card h3").first().textContent(), existingTrialTitle,
+      "a failed refresh erased the last known trial");
+    await page.unroute("https://studio.genlayer.com/api");
+    await page.getByRole("button", { name: "Dismiss error" }).click();
     const overflows = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
     assert.equal(overflows, false, `${viewport.width}px viewport overflows horizontally`);
     const errors = await page.locator('[role="alert"]').allTextContents();
     assert.deepEqual(errors, [], `${viewport.width}px page showed an error`);
-    console.log(`PASS: browser navigation, public trial read, and layout at ${viewport.width}px`);
+    console.log(`PASS: browser navigation, current arena, archive read, and layout at ${viewport.width}px`);
     await page.close();
   }
 } finally {
