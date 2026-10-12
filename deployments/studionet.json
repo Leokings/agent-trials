@@ -1,7 +1,8 @@
 {
   "network": "studionet",
   "chainId": 61999,
-  "address": "0x30E55a1bcc9E571c44D8DBD18Fbf23f34E6aDd92",
-  "deployTransaction": "0xb1e8230c0b85846bc23112aa18c23d8d8dd1662091924412fa4b14fbc8344e92",
-  "policyVersion": "agent-trials.v2"
+  "address": "0x6Dca254a4cbc4c374C23304A553b90Ae76893958",
+  "deployTransaction": "0xb1316c3c8c7234aa47c6497d2d821958ec2addd7473f44ad1d7d1449eb5755fb",
+  "policyVersion": "agent-trials.v4",
+  "sourceCommit": "0f1ec874e92d889740cab83da98ef06f5bb961ae"
 }

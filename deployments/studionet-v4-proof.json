@@ -1,0 +1,47 @@
+{
+  "network": "studionet",
+  "chainId": 61999,
+  "policyVersion": "agent-trials.v4",
+  "contractAddress": "0x6Dca254a4cbc4c374C23304A553b90Ae76893958",
+  "deploymentTransaction": {
+    "hash": "0xb1316c3c8c7234aa47c6497d2d821958ec2addd7473f44ad1d7d1449eb5755fb",
+    "status": "FINALIZED",
+    "execution": "SUCCESS"
+  },
+  "contractSourceCommit": "0f1ec874e92d889740cab83da98ef06f5bb961ae",
+  "evidenceFixture": {
+    "url": "https://raw.githubusercontent.com/Leokings/agent-trials/0f1ec874e92d889740cab83da98ef06f5bb961ae/tests/fixtures/pinned-evidence.txt",
+    "sha256": "771932ce5572bbe92c1c7581d8a27d0f309f78ee734cb0eb4eed54f0fe03dcb3"
+  },
+  "positiveFullFlow": {
+    "trialId": "full-flow-0b1c3663ac",
+    "register": "0x6c4f24c2646513d55188d19a88253667caae270f7ea8f3e7e0440e4fedd99e58",
+    "create": "0x51a11ed51144dd53393fc4bf3eb856ee2bfdb421a285f89b4cd1bca07cfd3001",
+    "commit": "0xb43dd65cde653952ba6e2fa2067af022320d630f1d83a4844103d55047d73308",
+    "reveal": "0x2ef8414ea367975e4c4b431ed9f07c9b1d043e7e39f6e07d670f16234fcf86b9",
+    "score": "0xa7899c632bfda9c0b364896fabb05340af34661a74e7d0b527d2b977104449df",
+    "outcome": "FINALIZED SUCCESS; 100/100; community score excluded from the official leaderboard"
+  },
+  "negativeCases": [
+    {
+      "case": "incorrect evidence SHA-256",
+      "transaction": "0x96e3146f12d2971351d7bd6a3c50b6f59e21709f6cc8e6ed1a4f88f28c9b4ce3",
+      "outcome": "FINALIZED execution error; trial count unchanged"
+    },
+    {
+      "case": "subjective rubric criterion",
+      "transaction": "0xa3113048561050cc26a2d43ac2d98ccfa841eb61efc64dfbdaa99f3a3031dfb9",
+      "outcome": "FINALIZED execution error; trial count unchanged"
+    }
+  ],
+  "mcpAgentFlow": {
+    "trialId": "mcp-agent-5bfd476347",
+    "create": "0xaa65e1700847b5c89719a04537a6b62464e2df1bdc0ece04b7f157227dc019d0",
+    "score": "0x59b7c31105d8a9e51512726448a1765e9892eee6cb3ce870f57df3ddc6eba82b",
+    "outcome": "FINALIZED SUCCESS; 100/100; five checks true"
+  },
+  "limitations": [
+    "Pinned URL and digest prove which GitHub commit content was fetched, not that the author or claim is truthful or authoritative.",
+    "Studionet is a development network; this is not production-grade reputation or Sybil resistance."
+  ]
+}

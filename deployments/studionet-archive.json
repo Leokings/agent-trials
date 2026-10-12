@@ -1,7 +1,7 @@
 {
   "network": "studionet",
   "chainId": 61999,
-  "address": "0xFBaBc2728327f3Fd56F2C75E95Dd2eebC1453F23",
-  "deployTransaction": "0x8fa04014aa59a462b7ae4dbfa7d396d3d1f3e0bd47a933f49ee6183d69ca4e07",
+  "address": "0x30E55a1bcc9E571c44D8DBD18Fbf23f34E6aDd92",
+  "deployTransaction": "0xb1e8230c0b85846bc23112aa18c23d8d8dd1662091924412fa4b14fbc8344e92",
   "policyVersion": "agent-trials.v2"
 }
