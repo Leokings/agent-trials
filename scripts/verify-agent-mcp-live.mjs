@@ -8,6 +8,7 @@ import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { createChain } from "./agent-runtime.mjs";
 import deployment from "../deployments/studionet.json" with { type: "json" };
+import { getPinnedEvidence } from "./pinned-evidence.mjs";
 
 const endpoint = "https://studio.genlayer.com/api";
 const creator = createClient({
@@ -58,7 +59,7 @@ try {
   const commitAt = Date.now() + 180_000;
   const revealAt = commitAt + 90_000;
   const task = "Explain what a PENDING background job means and the safest next step for the user.";
-  const evidence = "The job status API returns PENDING while work is still running. DONE means the work completed. A PENDING job should be checked again using its existing job ID; starting a new job with a new ID can duplicate the work.";
+  const { evidenceSourceUrl, evidenceSourceSha256 } = await getPinnedEvidence();
   const criteria = [
     "Explains that PENDING means work is still running.",
     "Does not call PENDING a completed job.",
@@ -70,7 +71,7 @@ try {
     console.log(`Creating fresh-wallet MCP trial ${trialId} on Studionet...`);
     const createHash = await creator.writeContract({
       address: deployment.address, functionName: "create_trial",
-      args: [trialId, "Fresh-wallet MCP trial", task, evidence, JSON.stringify(criteria), commitAt, revealAt],
+      args: [trialId, "Fresh-wallet MCP trial", task, evidenceSourceUrl, evidenceSourceSha256, JSON.stringify(criteria), commitAt, revealAt],
       value: 0n, leaderOnly: true,
     });
     console.log(`Creation transaction: ${createHash}`);

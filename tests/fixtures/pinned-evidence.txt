@@ -1,0 +1,1 @@
+The status API returns PENDING until the background job completes. A PENDING job must not be retried with a new ID. A completed job returns DONE.

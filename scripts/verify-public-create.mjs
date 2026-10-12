@@ -3,6 +3,7 @@ import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionHashVariant } from "genlayer-js/types";
 import deployment from "../deployments/studionet.json" with { type: "json" };
+import { getPinnedEvidence } from "./pinned-evidence.mjs";
 
 const endpoint = "https://studio.genlayer.com/api";
 const account = createAccount(`0x${randomBytes(32).toString("hex")}`);
@@ -18,6 +19,7 @@ const criteria = [
   "Does not suggest starting a duplicate job.",
   "Mentions that DONE is the completed status.",
 ];
+const { evidenceSourceUrl, evidenceSourceSha256 } = await getPinnedEvidence();
 
 const policy = await reader.readContract({
   address: deployment.address,
@@ -36,7 +38,8 @@ const hash = await client.writeContract({
     trialId,
     "Public access smoke test",
     "Explain the status of a pending background job and the safest next step using only the fixed evidence.",
-    "The status API returns PENDING until the background job completes. A PENDING job must not be retried with a new ID. A completed job returns DONE.",
+    evidenceSourceUrl,
+    evidenceSourceSha256,
     JSON.stringify(criteria),
     commitAt,
     revealAt,

@@ -140,14 +140,15 @@ export function createServer({ chain = createChain(), store = createStore(), wal
       return { hash, submitted, message: "Finalization requested. Check transaction_status for the original hash." };
     });
 
-  tool("publish_trial", "Publish a community trial signed by this agent's existing wallet. Returns a transaction hash; check its final outcome before sharing the trial.",
+  tool("publish_trial", "Publish a community trial signed by this agent's existing wallet. Use a public raw GitHub URL pinned to a 40-character commit SHA and its lowercase SHA-256 digest; validators fetch the source independently. Returns a transaction hash; check its final outcome before sharing the trial.",
     z.object({
       trial_id: z.string(), title: z.string().min(4).max(80), task: z.string().min(20).max(1000),
-      evidence: z.string().min(40).max(4000), criteria: z.array(z.string().min(8).max(220)).length(5),
+      evidence_source_url: z.string().url(), evidence_source_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      criteria: z.array(z.string().min(8).max(220)).length(5),
       entry_minutes: z.number().int().min(2).max(1440).default(15),
       reveal_minutes: z.number().int().min(2).max(60).default(5),
     }),
-    async ({ trial_id, title, task, evidence, criteria, entry_minutes, reveal_minutes }) => {
+    async ({ trial_id, title, task, evidence_source_url, evidence_source_sha256, criteria, entry_minutes, reveal_minutes }) => {
       assertTrialId(trial_id);
       if (new Set(criteria).size !== 5) throw new Error("Provide five distinct checks.");
       const wallet = await walletLoader();
@@ -155,7 +156,7 @@ export function createServer({ chain = createChain(), store = createStore(), wal
       const hash = await wallet.writeContract({
         chainId: CHAIN_ID, endpoint: "https://studio.genlayer.com/api", address: chain.address,
         functionName: "create_trial",
-        args: [trial_id, title, task, evidence, JSON.stringify(criteria), commitAt, commitAt + reveal_minutes * 60_000],
+        args: [trial_id, title, task, evidence_source_url, evidence_source_sha256, JSON.stringify(criteria), commitAt, commitAt + reveal_minutes * 60_000],
         leaderOnly: true,
       });
       return { hash, trial_id, message: "Creation submitted, not finalized. Check transaction_status before announcing the trial." };

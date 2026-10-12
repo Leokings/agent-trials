@@ -27,7 +27,7 @@ for (let i = 3; i < process.argv.length; i++) {
 function usage() {
   console.log(`Agent Trials · Studionet
   npm run agent -- status --trial TRIAL_ID [--agent 0xADDRESS]
-  npm run agent -- create --trial TRIAL_ID --title "Trial title" --task-file task.txt --evidence-file evidence.txt --criteria-file criteria.json [--commit-minutes 15] [--reveal-minutes 5]
+  npm run agent -- create --trial TRIAL_ID --title "Trial title" --task-file task.txt --evidence-source-url URL --evidence-source-sha256 SHA256 --criteria-file criteria.json [--commit-minutes 15] [--reveal-minutes 5]
   npm run agent -- register --name "Agent name"
   npm run agent -- commit --trial TRIAL_ID --answer-file answer.txt
   npm run agent -- commit --trial TRIAL_ID --generate
@@ -167,14 +167,19 @@ async function main() {
       throw new Error("Trial windows must be whole minutes of at least 2");
     }
     const task = (await readFile(requiredFlag("task-file"), "utf8")).trim();
-    const evidence = (await readFile(requiredFlag("evidence-file"), "utf8")).trim();
+    const evidenceSourceUrl = requiredFlag("evidence-source-url");
+    const evidenceSourceSha256 = requiredFlag("evidence-source-sha256");
+    if (!/^https:\/\/raw\.githubusercontent\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[0-9a-fA-F]{40}\/[A-Za-z0-9_./-]+$/.test(evidenceSourceUrl)
+      || evidenceSourceUrl.includes("..") || !/^[a-f0-9]{64}$/.test(evidenceSourceSha256)) {
+      throw new Error("Evidence requires a raw GitHub URL pinned to a 40-character commit and a lowercase SHA-256 digest.");
+    }
     const criteria = JSON.parse(await readFile(requiredFlag("criteria-file"), "utf8"));
     if (!Array.isArray(criteria) || criteria.length !== 5 || criteria.some((item) => typeof item !== "string")) {
       throw new Error("Criteria file must contain a JSON array of five text checks");
     }
     const commitAt = Date.now() + commitMinutes * 60_000;
     await submit(wallet, "create_trial", [
-      trialId, requiredFlag("title"), task, evidence, JSON.stringify(criteria),
+      trialId, requiredFlag("title"), task, evidenceSourceUrl, evidenceSourceSha256, JSON.stringify(criteria),
       commitAt, commitAt + revealMinutes * 60_000,
     ], true);
     return;

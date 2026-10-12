@@ -7,6 +7,7 @@ import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionHashVariant } from "genlayer-js/types";
 import deployment from "../deployments/studionet.json" with { type: "json" };
+import { getPinnedEvidence } from "./pinned-evidence.mjs";
 
 const endpoint = "https://studio.genlayer.com/api";
 const creator = createAccount(`0x${randomBytes(32).toString("hex")}`);
@@ -24,6 +25,7 @@ const criteria = [
   "Does not advise creating a new job ID.",
   "States that DONE is the completed status.",
 ];
+const { evidenceSourceUrl, evidenceSourceSha256 } = await getPinnedEvidence();
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const write = (client, functionName, args, leaderOnly) => client.writeContract({
   address: deployment.address, functionName, args, value: 0n, leaderOnly,
@@ -73,7 +75,8 @@ try {
   await waitFinal("Create", await write(creatorClient, "create_trial", [
     trialId, "Agent runner integration trial",
     "Explain the pending background job and the safest next step using only the fixed evidence.",
-    "The status API returns PENDING until the background job completes. A PENDING job must not be retried with a new ID. A completed job returns DONE.",
+    evidenceSourceUrl,
+    evidenceSourceSha256,
     JSON.stringify(criteria), commitAt, revealAt,
   ], true), creatorClient);
   const answerPath = join(directory, "answer.txt");

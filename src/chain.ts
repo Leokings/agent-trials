@@ -9,14 +9,15 @@ export const ARCHIVE_CONTRACT_ADDRESS = archive.address as `0x${string}`;
 
 export type Agent = { address: string; name: string; points: number; scored_trials: number };
 export type Trial = {
-  id: string; title: string; task: string; evidence: string; criteria: string[];
+  id: string; title: string; task: string; evidence: string;
+  evidence_source_url?: string; evidence_source_sha256?: string; criteria: string[];
   commit_deadline_ms: number; reveal_deadline_ms: number; entries: string[];
   creator: string; official: boolean;
 };
 export type Entry = {
   trial_id: string; agent: string; name: string; committed: boolean; revealed: boolean;
   answer: string; scored: boolean;
-  result: { checks: boolean[]; points: number; official: boolean } | null;
+  result: { checks: boolean[]; evidence_quotes?: string[]; points: number; official: boolean } | null;
 };
 export type Snapshot = {
   policy: { max_entrants: number; trial_count: number; page_size: number };
